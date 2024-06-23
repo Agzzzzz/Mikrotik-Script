@@ -1,0 +1,50 @@
+:global lastTime;
+:global output;
+:global ChatId;
+:global TelegramApi;
+:set TelegramApi 654XXXXX:AAH6YYYYYYYY
+:set ChatId 76366029
+/system script environment remove [find where name="log"];
+/system script environment set name="log" value="";
+:global logMessage;
+:global lastLogTime;
+:global lastLogMsg;
+:global apiURL "https://api.telegram.org/bot$TelegramApi/sendMessage";
+:global logInterval 5m;
+:global logTimer;
+/system script
+add name=log-policy-drops policy=\
+    ftp,reboot,read,write,policy,test,winbox,password,sniff,sensitive,api \
+    source="/log print without-paging where topics~\"(info|system|error|critical|warning)\" and action~\"(received|sent|dropped)\"" \
+    !log,pickup,via-webhook;
+/system script
+add name=send-log-to-telegram policy=\
+    ftp,reboot,read,write,policy,test,winbox,password,sniff,sensitive,api \
+    source=":local logMsg ([/system script get \$lastLogMsg value-name=\
+    source]);\r\
+        \n:if ([/system script get \$lastLogTime] + \$logInterval < [:log get 0 time]) do={\r\
+        \n    :local logTime [/system clock get time];\r\
+        \n    :local logDate [/system clock get date];\r\
+        \n    :set \$logMessage (\"[b]Log[/b]: \$logDate \$logTime\\n\$logMsg\");\r\
+        \n    :local postData \"chat_id=\$chatId&parse_mode=html&text=\$logMessage\";\r\
+        \n    :local response [:toarray [/tool fetch url=\$apiURL http-method=post http-data=\$postData as-value]];\r\
+        \n    :local httpStatus ([\$response->\"/status\"]);\r\
+        \n    :if (\$httpStatus=\"200 OK\") do={\r\
+        \n        :log info \"Log message sent to Telegram\";\r\
+        \n    } else={\r\
+        \n        :log error \"Failed to send log message to Telegram: \$response\";\r\
+        \n    }\r\
+        \n    :set \$lastLogTime [:log get 0 time];\r\
+        \n    :set \$lastLogMsg 0;\r\
+        \n} else={\r\
+        \n    :log warning \"Log message skipped. Too soon after last log.\";\r\
+        \n}";
+/system scheduler
+add interval=1s name=log-timer on-event=send-log-to-telegram policy=\
+    ftp,reboot,read,write,policy,test,winbox,password,sniff,sensitive,api \
+    start-time=startup;
+/system scheduler
+add interval=1s name=log-policy-drops on-event=log-policy-drops policy=\
+    ftp,reboot,read,write,policy,test,winbox,password,sniff,sensitive,api \
+    start-time=startup;
+ 
